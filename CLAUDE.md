@@ -35,3 +35,42 @@ pages.
 - Before implementing any non-trivial feature, ask clarifying
   questions about scope, edge cases, and constraints first —
   don't propose a plan until you've asked.
+
+## Feature Plan
+
+A web portal for a beginner-to-aeronautics class: visitors browse and try
+a growing collection of small interactive tools and learning artifacts.
+Built to keep growing — new tools get added over time without restructuring
+the portal shell.
+
+### Data model
+All in-memory in `index.html` (no backend/DB, per hard constraints).
+- `TOOLS`: array of tool entries, each `{ id, title, description, render(container) }`
+  (or an equivalent pattern — e.g. each tool's markup lives in a `<template>`
+  and its behavior in a scoped init function keyed by `id`).
+- `theme`: `"light" | "dark"`, persisted in `localStorage`.
+
+### Key flows
+- **Portal home**: grid/list of tool cards built from `TOOLS`; clicking a
+  card shows that tool (e.g. via view switching within the single page).
+- **Add a new tool** (repeated over time): append one entry to `TOOLS` plus
+  its markup/logic — should not require touching the shell/nav code.
+- **Theme toggle**: switch persists across visits via `localStorage`, applied
+  on load before first paint to avoid flash.
+
+### Phase 1 — Portal shell + Airfoil Visualizer
+- Portal shell: header/nav, tool grid, theme toggle, routing between home
+  and a single tool view — built to hold more than one tool.
+- Tool: **Airfoil Visualizer** — interactive airfoil shape/behavior
+  explorer for beginners (exact parameters/controls TBD, spec before
+  building).
+- Second phase-1 tool deferred — pick and spec once Airfoil Visualizer
+  is done.
+
+### Phase 2 — Second tool (TBD)
+- Spec and build a second tool using the same "append to `TOOLS`" pattern,
+  as a check that the shell holds up for a real second entry.
+
+### Later phases
+- Add further tools/lessons incrementally, one phase per tool (or small
+  batch), each just adding entries — no shell changes expected.
