@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aeronautics Tools Portal</title>
+
+<script>
+  // Applied before first paint to avoid a light/dark flash.
+  (function () {
+    var saved = localStorage.getItem('theme');
+    var theme = saved === 'dark' || saved === 'light'
+      ? saved
+      : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap">
+
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+  :root {
+    --bg: #f3f8fc;
+    --bg-elevated: #ffffff;
+    --border: #d9e6f0;
+    --ink: #1c2b3a;
+    --ink-dim: #5b7286;
+    --accent: #e07a3f;
+    --accent-dim: #f7ddc9;
+    --accent-ink: #ffffff;
+  }
+  html[data-theme="dark"] {
+    --bg: #10161d;
+    --bg-elevated: #182330;
+    --border: #253340;
+    --ink: #e9eff5;
+    --ink-dim: #8fa2b3;
+    --accent: #f0975a;
+    --accent-dim: #3a2c22;
+    --accent-ink: #10161d;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+  .font-display {
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+  }
+  a { color: var(--accent); }
+  a:hover { color: var(--accent); opacity: 0.85; }
+
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <header class="flex items-center justify-between px-6 sm:px-10 py-6 border-b" style="border-color: var(--border);">
+    <div class="flex items-center gap-3">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 16 L22 12 L14 19 L11 17 L2 16 Z"/>
+        <path d="M11 17 L9 22 L12 21 L13 18"/>
+      </svg>
+      <span class="font-display text-xl font-bold">Flight Lab</span>
+    </div>
+
+    <button id="theme-toggle" type="button"
+      class="flex items-center gap-2 px-4 py-2 rounded-full text-sm"
+      style="background: var(--bg-elevated); border: 1px solid var(--border); color: var(--ink-dim);"
+      aria-pressed="false">
+      <span id="theme-toggle-icon" aria-hidden="true"></span>
+      <span id="theme-toggle-label">Dark</span>
+    </button>
+  </header>
+
+  <main class="flex-1 px-6 sm:px-10 py-10 max-w-5xl w-full mx-auto">
+
+    <!-- Home view: grid of tool cards -->
+    <section id="home-view">
+      <h1 class="font-display text-2xl font-bold mb-1">Tools &amp; learning artifacts</h1>
+      <p class="mb-8" style="color: var(--ink-dim);">A growing set of interactive tools for learning the fundamentals of flight.</p>
+
+      <div id="tool-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-6"></div>
+    </section>
+
+    <!-- Tool view: shows the active tool -->
+    <section id="tool-view" hidden>
+      <button id="back-to-home" type="button" class="flex items-center gap-2 mb-6 text-sm font-medium" style="color: var(--accent);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+        Back to all tools
+      </button>
+
+      <h2 id="tool-view-title" class="font-display text-2xl font-bold mb-4"></h2>
+      <div id="tool-view-content" class="rounded-2xl p-8" style="background: var(--bg-elevated); border: 1px solid var(--border);"></div>
+    </section>
+
+  </main>
+
+  <footer class="px-6 sm:px-10 py-6 text-xs text-center" style="color: var(--ink-dim);">
+    Built for a beginner-to-aeronautics class.
+  </footer>
+
+  <script>
+    // ---- Data model -------------------------------------------------
+
+    var TOOLS = [
+      {
+        id: 'airfoil-visualizer',
+        title: 'Airfoil Visualizer',
+        description: 'Shape a wing profile and see how camber and angle of attack change the airflow around it.',
+        render: function (container) {
+          renderPlaceholder(container, 'Airfoil Visualizer');
+        }
+      },
+      {
+        id: 'placeholder-tool-2',
+        title: 'Coming Soon',
+        description: 'A second tool will land here as the collection grows.',
+        render: function (container) {
+          renderPlaceholder(container, 'Coming Soon');
+        }
+      }
+    ];
+
+    function renderPlaceholder(container, title) {
+      container.innerHTML =
+        '<p style="color: var(--ink-dim);">' +
+        'Placeholder for &ldquo;' + title + '&rdquo;. This tool has not been built yet &mdash; ' +
+        'this is just proving that navigation opens and closes a tool correctly.' +
+        '</p>';
+    }
+
+    // ---- Home grid ----------------------------------------------------
+
+    var toolGrid = document.getElementById('tool-grid');
+
+    TOOLS.forEach(function (tool) {
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'text-left rounded-2xl p-6 flex flex-col gap-3 transition';
+      card.style.background = 'var(--bg-elevated)';
+      card.style.border = '1px solid var(--border)';
+      card.addEventListener('mouseenter', function () { card.style.borderColor = 'var(--accent)'; });
+      card.addEventListener('mouseleave', function () { card.style.borderColor = 'var(--border)'; });
+
+      var title = document.createElement('div');
+      title.className = 'font-display text-lg font-bold';
+      title.textContent = tool.title;
+
+      var desc = document.createElement('div');
+      desc.className = 'text-sm';
+      desc.style.color = 'var(--ink-dim)';
+      desc.textContent = tool.description;
+
+      var open = document.createElement('div');
+      open.className = 'text-sm font-medium mt-auto';
+      open.style.color = 'var(--accent)';
+      open.textContent = 'Open →';
+
+      card.appendChild(title);
+      card.appendChild(desc);
+      card.appendChild(open);
+
+      card.addEventListener('click', function () { openTool(tool.id); });
+
+      toolGrid.appendChild(card);
+    });
+
+    // ---- Navigation: home view <-> tool view --------------------------
+
+    var homeView = document.getElementById('home-view');
+    var toolView = document.getElementById('tool-view');
+    var toolViewTitle = document.getElementById('tool-view-title');
+    var toolViewContent = document.getElementById('tool-view-content');
+
+    function openTool(id) {
+      var tool = TOOLS.filter(function (t) { return t.id === id; })[0];
+      if (!tool) return;
+
+      toolViewTitle.textContent = tool.title;
+      toolViewContent.innerHTML = '';
+      tool.render(toolViewContent);
+
+      homeView.hidden = true;
+      toolView.hidden = false;
+    }
+
+    function closeTool() {
+      toolView.hidden = true;
+      homeView.hidden = false;
+    }
+
+    document.getElementById('back-to-home').addEventListener('click', closeTool);
+
+    // ---- Theme toggle ---------------------------------------------------
+
+    var themeToggle = document.getElementById('theme-toggle');
+    var themeToggleIcon = document.getElementById('theme-toggle-icon');
+    var themeToggleLabel = document.getElementById('theme-toggle-label');
+
+    var sunIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="18.4" y1="18.4" x2="19.8" y2="19.8"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.2" y1="19.8" x2="5.6" y2="18.4"/><line x1="18.4" y1="5.6" x2="19.8" y2="4.2"/></svg>';
+    var moonIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>';
+
+    function updateThemeToggle(theme) {
+      var isDark = theme === 'dark';
+      themeToggleIcon.innerHTML = isDark ? moonIcon : sunIcon;
+      themeToggleLabel.textContent = isDark ? 'Light' : 'Dark';
+      themeToggle.setAttribute('aria-pressed', String(isDark));
+    }
+
+    updateThemeToggle(document.documentElement.getAttribute('data-theme'));
+
+    themeToggle.addEventListener('click', function () {
+      var current = document.documentElement.getAttribute('data-theme');
+      var next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+      updateThemeToggle(next);
+    });
+  </script>
+
+</body>
+</html>

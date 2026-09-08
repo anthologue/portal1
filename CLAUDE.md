@@ -72,13 +72,15 @@ All in-memory in `index.html` (no backend/DB, per hard constraints).
   on load before first paint to avoid flash.
 
 ### Phase 1 — Portal shell + Airfoil Visualizer
-- Portal shell: header/nav, tool grid, theme toggle, routing between home
-  and a single tool view — built to hold more than one tool.
-- Tool: **Airfoil Visualizer** — interactive airfoil shape/behavior
+- [x] Portal shell: header/nav, tool grid, theme toggle, routing between
+  home and a single tool view — built in `index.html`, proven with two
+  placeholder tool cards that the nav actually opens and closes (no real
+  tool logic yet).
+- [ ] Tool: **Airfoil Visualizer** — interactive airfoil shape/behavior
   explorer for beginners (exact parameters/controls TBD, spec before
-  building).
+  building) — replaces the first placeholder card.
 - Second phase-1 tool deferred — pick and spec once Airfoil Visualizer
-  is done.
+  is done; the second placeholder card can be dropped or reused for it.
 
 ### Phase 2 — Second tool (TBD)
 - Spec and build a second tool using the same "append to `TOOLS`" pattern,
