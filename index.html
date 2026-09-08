@@ -112,9 +112,9 @@
       {
         id: 'airfoil-visualizer',
         title: 'Airfoil Visualizer',
-        description: 'Shape a wing profile and see how camber and angle of attack change the airflow around it.',
+        description: 'Adjust the angle of attack on a NACA 2412 wing and watch a live flow simulation curve the air around it.',
         render: function (container) {
-          renderPlaceholder(container, 'Airfoil Visualizer');
+          renderAirfoilVisualizer(container);
         }
       },
       {
@@ -133,6 +133,323 @@
         'Placeholder for &ldquo;' + title + '&rdquo;. This tool has not been built yet &mdash; ' +
         'this is just proving that navigation opens and closes a tool correctly.' +
         '</p>';
+    }
+
+    // ---- Airfoil Visualizer: NACA 2412 + live vortex-lattice flow solver ----
+    //
+    // A simplified, inviscid 2D potential-flow model (a small vortex-lattice
+    // panel method), not a full CFD solver. It reproduces the qualitative
+    // physics beginners need to see: cambered airfoils lift even at zero
+    // angle of attack, lift grows with angle of attack, and — since the
+    // model has no viscosity — flow separation past the stall angle is
+    // added as a deliberate visual cue rather than a solved result.
+
+    var AirfoilSim = (function () {
+      var NACA = { m: 0.02, p: 0.4, t: 0.12 }; // NACA 2412
+      var PANEL_COUNT = 10;
+      var STREAMLINE_COUNT = 16;
+      var STEP_COUNT = 140;
+      var STEP_SIZE = 0.018; // chord units
+      var STALL_ANGLE_DEG = 15;
+
+      function nacaCamber(x) {
+        var m = NACA.m, p = NACA.p;
+        if (p === 0 || m === 0) return { yc: 0, dyc: 0 };
+        if (x < p) {
+          return {
+            yc: (m / (p * p)) * (2 * p * x - x * x),
+            dyc: (2 * m / (p * p)) * (p - x)
+          };
+        }
+        return {
+          yc: (m / ((1 - p) * (1 - p))) * ((1 - 2 * p) + 2 * p * x - x * x),
+          dyc: (2 * m / ((1 - p) * (1 - p))) * (p - x)
+        };
+      }
+
+      function nacaThickness(x) {
+        var t = NACA.t;
+        return 5 * t * (0.2969 * Math.sqrt(x) - 0.1260 * x - 0.3516 * x * x + 0.2843 * x * x * x - 0.1015 * x * x * x * x);
+      }
+
+      // Cosine spacing gives better resolution near the leading/trailing edge.
+      function cosineStations(n) {
+        var xs = [];
+        for (var i = 0; i <= n; i++) {
+          xs.push((1 - Math.cos(Math.PI * i / n)) / 2);
+        }
+        return xs;
+      }
+
+      function rotatePoint(x, y, angleRad, pivotX, pivotY) {
+        var dx = x - pivotX, dy = y - pivotY;
+        var cos = Math.cos(angleRad), sin = Math.sin(angleRad);
+        return { x: pivotX + dx * cos - dy * sin, y: pivotY + dx * sin + dy * cos };
+      }
+
+      // Builds the airfoil surface polygon plus vortex-lattice panel data,
+      // rotated by the angle of attack (freestream stays horizontal).
+      function buildGeometry(alphaDeg) {
+        var alphaRad = -alphaDeg * Math.PI / 180;
+        var pivotX = 0.25, pivotY = 0; // quarter-chord
+
+        var xs = cosineStations(60);
+        var upper = [], lower = [];
+        xs.forEach(function (x) {
+          var c = nacaCamber(x);
+          var yt = nacaThickness(x);
+          var theta = Math.atan(c.dyc);
+          var xu = x - yt * Math.sin(theta), yu = c.yc + yt * Math.cos(theta);
+          var xl = x + yt * Math.sin(theta), yl = c.yc - yt * Math.cos(theta);
+          upper.push(rotatePoint(xu, yu, alphaRad, pivotX, pivotY));
+          lower.push(rotatePoint(xl, yl, alphaRad, pivotX, pivotY));
+        });
+        var polygon = upper.concat(lower.slice().reverse());
+
+        var panelXs = cosineStations(PANEL_COUNT);
+        var camberPts = panelXs.map(function (x) {
+          var c = nacaCamber(x);
+          return rotatePoint(x, c.yc, alphaRad, pivotX, pivotY);
+        });
+
+        var vortices = [], controls = [];
+        for (var i = 0; i < PANEL_COUNT; i++) {
+          var a = camberPts[i], b = camberPts[i + 1];
+          vortices.push({ x: a.x + 0.25 * (b.x - a.x), y: a.y + 0.25 * (b.y - a.y) });
+          var cx = a.x + 0.75 * (b.x - a.x), cy = a.y + 0.75 * (b.y - a.y);
+          var dx = b.x - a.x, dy = b.y - a.y;
+          var len = Math.sqrt(dx * dx + dy * dy) || 1e-6;
+          controls.push({ x: cx, y: cy, nx: -dy / len, ny: dx / len });
+        }
+
+        return { polygon: polygon, vortices: vortices, controls: controls };
+      }
+
+      function inducedVelocity(px, py, vx, vy, gamma) {
+        var dx = px - vx, dy = py - vy;
+        var r2 = dx * dx + dy * dy;
+        if (r2 < 1e-6) r2 = 1e-6;
+        return { u: -gamma * dy / (2 * Math.PI * r2), v: gamma * dx / (2 * Math.PI * r2) };
+      }
+
+      // Small dense linear solve (Gaussian elimination with partial pivoting).
+      function solveLinear(A, b) {
+        var n = b.length;
+        var M = A.map(function (row, i) { return row.concat([b[i]]); });
+        for (var col = 0; col < n; col++) {
+          var pivotRow = col;
+          for (var r = col + 1; r < n; r++) {
+            if (Math.abs(M[r][col]) > Math.abs(M[pivotRow][col])) pivotRow = r;
+          }
+          var tmp = M[col]; M[col] = M[pivotRow]; M[pivotRow] = tmp;
+          var pivotVal = M[col][col] || 1e-9;
+          for (var c = col; c <= n; c++) M[col][c] /= pivotVal;
+          for (r = 0; r < n; r++) {
+            if (r === col) continue;
+            var factor = M[r][col];
+            for (c = col; c <= n; c++) M[r][c] -= factor * M[col][c];
+          }
+        }
+        return M.map(function (row) { return row[n]; });
+      }
+
+      // Solves vortex strengths so flow tangency holds at each control point.
+      function solveCirculation(geo, U) {
+        var n = geo.vortices.length;
+        var A = [], b = [];
+        for (var i = 0; i < n; i++) {
+          var cp = geo.controls[i];
+          var row = [];
+          for (var j = 0; j < n; j++) {
+            var vt = geo.vortices[j];
+            var ind = inducedVelocity(cp.x, cp.y, vt.x, vt.y, 1);
+            row.push(ind.u * cp.nx + ind.v * cp.ny);
+          }
+          A.push(row);
+          b.push(-(U * cp.nx));
+        }
+        return solveLinear(A, b);
+      }
+
+      function velocityAt(px, py, geo, gammas, U) {
+        var u = U, v = 0;
+        for (var j = 0; j < geo.vortices.length; j++) {
+          var vt = geo.vortices[j];
+          var ind = inducedVelocity(px, py, vt.x, vt.y, gammas[j]);
+          u += ind.u; v += ind.v;
+        }
+        return { u: u, v: v };
+      }
+
+      function pointInPolygon(x, y, poly) {
+        var inside = false;
+        for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+          var xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+          var intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      }
+
+      function computeStreamlines(geo, gammas, U, alphaDeg) {
+        var stalling = Math.abs(alphaDeg) > STALL_ANGLE_DEG;
+        var lines = [];
+        for (var s = 0; s < STREAMLINE_COUNT; s++) {
+          var y0 = -0.55 + (1.1 * s) / (STREAMLINE_COUNT - 1);
+          var pos = { x: -0.65, y: y0 };
+          var pts = [{ x: pos.x, y: pos.y }];
+          var separated = false;
+          for (var step = 0; step < STEP_COUNT; step++) {
+            var vel = velocityAt(pos.x, pos.y, geo, gammas, U);
+
+            if (stalling && pos.x > 0.35 && y0 > -0.05) separated = true;
+
+            var speed = Math.sqrt(vel.u * vel.u + vel.v * vel.v) || 1e-6;
+            var stepX = (vel.u / speed) * STEP_SIZE;
+            var stepY = (vel.v / speed) * STEP_SIZE;
+            if (separated) {
+              stepY += Math.sin(step * 0.9 + s) * 0.006 * (1 + step / STEP_COUNT);
+            }
+            var next = { x: pos.x + stepX, y: pos.y + stepY };
+
+            if (pointInPolygon(next.x, next.y, geo.polygon)) next = pos;
+            pos = next;
+            pts.push({ x: pos.x, y: pos.y });
+            if (pos.x > 1.3) break;
+          }
+          lines.push(pts);
+        }
+        return lines;
+      }
+
+      return {
+        STALL_ANGLE_DEG: STALL_ANGLE_DEG,
+        buildGeometry: buildGeometry,
+        solveCirculation: solveCirculation,
+        computeStreamlines: computeStreamlines
+      };
+    })();
+
+    // Set by whichever tool is currently open, so the shell's generic
+    // navigation and theme toggle can stop its animation / redraw it.
+    var activeToolCleanup = null;
+    var activeToolRedraw = null;
+
+    function renderAirfoilVisualizer(container) {
+      container.innerHTML =
+        '<div class="flex flex-col gap-6">' +
+          '<div class="flex flex-wrap items-end justify-between gap-6">' +
+            '<div>' +
+              '<label for="aoa-slider" class="block text-sm font-medium mb-1">' +
+                'Angle of attack: <span id="aoa-value">5</span>&deg;' +
+              '</label>' +
+              '<input id="aoa-slider" type="range" min="-10" max="20" step="1" value="5" class="w-64">' +
+            '</div>' +
+            '<div class="text-sm text-right leading-relaxed" style="color: var(--ink-dim);">' +
+              'Lift coefficient (C<sub>L</sub>): <strong id="cl-value" style="color: var(--ink);">0.00</strong><br>' +
+              '<span id="stall-warning" style="color: var(--accent); font-weight: 600;"></span>' +
+            '</div>' +
+          '</div>' +
+          '<canvas id="airfoil-canvas" width="700" height="380" class="w-full rounded-xl" ' +
+            'style="background: var(--bg); border: 1px solid var(--border);"></canvas>' +
+          '<p class="text-xs leading-relaxed" style="color: var(--ink-dim);">' +
+            'NACA 2412 airfoil, driven by a 10-panel vortex-lattice potential-flow solver computed ' +
+            'live in your browser. It&rsquo;s a simplified, inviscid teaching model &mdash; not a full ' +
+            'CFD simulation &mdash; so flow separation past the stall angle is a stylized visual cue ' +
+            'rather than a solved result.' +
+          '</p>' +
+        '</div>';
+
+      var canvas = container.querySelector('#airfoil-canvas');
+      var ctx = canvas.getContext('2d');
+      var slider = container.querySelector('#aoa-slider');
+      var aoaValueEl = container.querySelector('#aoa-value');
+      var clValueEl = container.querySelector('#cl-value');
+      var stallWarningEl = container.querySelector('#stall-warning');
+
+      var dashOffset = 0;
+      var rafId = null;
+      var geo, gammas, streamlines;
+
+      function palette() {
+        var s = getComputedStyle(document.documentElement);
+        return {
+          ink: s.getPropertyValue('--ink').trim(),
+          accent: s.getPropertyValue('--accent').trim()
+        };
+      }
+
+      function recompute() {
+        var alphaDeg = parseFloat(slider.value);
+        geo = AirfoilSim.buildGeometry(alphaDeg);
+        gammas = AirfoilSim.solveCirculation(geo, 1);
+        streamlines = AirfoilSim.computeStreamlines(geo, gammas, 1, alphaDeg);
+
+        var totalGamma = gammas.reduce(function (a, g) { return a + g; }, 0);
+        // Kutta–Joukowski, nondimensional chord = 1, U = 1. Negated because the
+        // point-vortex kernel above uses the counterclockwise-positive
+        // convention, opposite the clockwise convention L = rho * U * Gamma assumes.
+        var cl = -2 * totalGamma;
+
+        aoaValueEl.textContent = alphaDeg.toFixed(0);
+        clValueEl.textContent = cl.toFixed(2);
+        stallWarningEl.textContent = Math.abs(alphaDeg) > AirfoilSim.STALL_ANGLE_DEG
+          ? 'Flow separating — stalled'
+          : '';
+      }
+
+      // Maps nondimensional chord-space coordinates to canvas pixels.
+      function toScreen(x, y) {
+        var scale = 300;
+        var originX = canvas.width * 0.38;
+        var originY = canvas.height * 0.5;
+        return { x: originX + x * scale, y: originY - y * scale };
+      }
+
+      function draw() {
+        var pal = palette();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = pal.accent;
+        ctx.globalAlpha = 0.55;
+        ctx.setLineDash([6, 5]);
+        ctx.lineDashOffset = -dashOffset;
+        streamlines.forEach(function (pts) {
+          ctx.beginPath();
+          pts.forEach(function (p, idx) {
+            var sp = toScreen(p.x, p.y);
+            if (idx === 0) ctx.moveTo(sp.x, sp.y); else ctx.lineTo(sp.x, sp.y);
+          });
+          ctx.stroke();
+        });
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+
+        ctx.beginPath();
+        geo.polygon.forEach(function (p, idx) {
+          var sp = toScreen(p.x, p.y);
+          if (idx === 0) ctx.moveTo(sp.x, sp.y); else ctx.lineTo(sp.x, sp.y);
+        });
+        ctx.closePath();
+        ctx.fillStyle = pal.ink;
+        ctx.globalAlpha = 0.92;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      function tick() {
+        dashOffset = (dashOffset + 0.6) % 11;
+        draw();
+        rafId = requestAnimationFrame(tick);
+      }
+
+      slider.addEventListener('input', recompute);
+      recompute();
+      tick();
+
+      activeToolRedraw = draw;
+      activeToolCleanup = function () { cancelAnimationFrame(rafId); };
     }
 
     // ---- Home grid ----------------------------------------------------
@@ -182,6 +499,9 @@
       var tool = TOOLS.filter(function (t) { return t.id === id; })[0];
       if (!tool) return;
 
+      if (activeToolCleanup) { activeToolCleanup(); activeToolCleanup = null; }
+      activeToolRedraw = null;
+
       toolViewTitle.textContent = tool.title;
       toolViewContent.innerHTML = '';
       tool.render(toolViewContent);
@@ -193,6 +513,9 @@
     function closeTool() {
       toolView.hidden = true;
       homeView.hidden = false;
+
+      if (activeToolCleanup) { activeToolCleanup(); activeToolCleanup = null; }
+      activeToolRedraw = null;
     }
 
     document.getElementById('back-to-home').addEventListener('click', closeTool);
@@ -221,6 +544,7 @@
       document.documentElement.setAttribute('data-theme', next);
       localStorage.setItem('theme', next);
       updateThemeToggle(next);
+      if (activeToolRedraw) activeToolRedraw();
     });
   </script>
 
