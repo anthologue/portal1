@@ -31,6 +31,19 @@ pages.
 - A toggle for light and dark theme, with the choice remembered
   across visits.
 
+## Design direction
+Standing visual direction for the portal shell and every tool page (based on
+the "Sky & Flight" direction, chosen from proposed options) — apply it to
+everything already built and to anything added later, automatically, without
+being asked again:
+- Clean and minimal. Avoid visual clutter, decoration, or busy backgrounds.
+- One calm accent color, used sparingly and consistently (e.g. for links,
+  active states, and primary actions) — not multiple competing accents.
+- Generous white space; don't crowd content.
+- Consistent spacing scale and typography (font choices, sizes, weights)
+  reused across the shell and every tool, so tools feel like one coherent
+  site rather than pasted-together pages.
+
 ## Working conventions
 - Before implementing any non-trivial feature, ask clarifying
   questions about scope, edge cases, and constraints first —
